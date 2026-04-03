@@ -1,123 +1,93 @@
-import sys
-import random
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QPushButton, QLabel, QLineEdit, QTabWidget, QGraphicsDropShadowEffect)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox
 
-# --- ЛЕГКИЙ ДИЗАЙН ---
-STYLE = """
-QMainWindow { background-color: #ffffff; }
-QTabWidget::pane { border: none; background-color: #ffffff; }
-QTabBar::tab {
-    background: #f0f0f0; color: #555; padding: 12px 40px;
-    border-radius: 10px; margin: 5px; font-weight: bold;
-}
-QTabBar::tab:selected { background: #007AFF; color: #fff; }
+class LCG:
+    def __init__(self, seed=1):
+        self.m, self.a, self.c = 2 ** 64, 6364136223846793005, 1442695040888963407
+        self.state = seed
 
-QLineEdit {
-    border: 2px solid #eee; border-radius: 12px; padding: 12px;
-    font-size: 14px; background: #f9f9f9; color: #333;
-}
-QLineEdit:focus { border: 2px solid #007AFF; }
+    def get_value(self):
+        self.state = (self.a * self.state + self.c) % self.m
+        return self.state / self.m
 
-QPushButton {
-    background-color: #007AFF; color: white; border-radius: 12px;
-    padding: 14px; font-weight: bold; font-size: 14px;
-}
-QPushButton:hover { background-color: #0063CC; }
+# настройки шара
+PROBS_8BALL = [0.15, 0.10, 0.25, 0.10, 0.10, 0.15, 0.05, 0.10]
+ANSWERS_8BALL = ["Бесспорно", "Определённо да", "Возможно", "Шансы 50 на 50",
+                 "Спроси позже", "Сомнительно", "Маловероятно", "Точно нет"]
 
-#MagicBall {
-    background-color: qradialgradient(cx:0.4, cy:0.4, radius: 1, fx:0.3, fy:0.3, stop:0 #444, stop:1 #000);
-    color: white; border-radius: 90px; font-weight: bold; font-size: 14px; padding: 20px;
-}
-"""
+def validate_probabilities():
+    if len(PROBS_8BALL) != 8 or round(sum(PROBS_8BALL), 5) != 1.0:
+        raise ValueError("Ошибка: Шар должен содержать ровно 8 вероятностей с суммой 1.0!")
 
-class WhiteMinimalApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Oracle")
-        self.setFixedSize(380, 500)
-        self.setStyleSheet(STYLE)
+def roll_dice(probs, rng):
+    r = rng.get_value()
+    for i, p in enumerate(probs):
+        r -= p
+        if r <= 0: return i
+    return len(probs) - 1
 
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+class RandomEventsApp:
+    def __init__(self, root):
+        self.root, self.rng = root, LCG(int(time.time()))
+        root.title("Моделирование событий")
+        root.geometry("500x350")
 
-        self.tabs.addTab(self.create_yes_no(), "Да/Нет")
-        self.tabs.addTab(self.create_ball(), "Шар")
+        nb = ttk.Notebook(root)
+        nb.pack(fill='both', expand=True, padx=10, pady=10)
 
-    def add_shadow(self, widget):
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(25)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 8)
-        widget.setGraphicsEffect(shadow)
+        # да / нет
+        t1 = ttk.Frame(nb, padding=20)
+        nb.add(t1, text="Скажи 'Да' или 'Нет'")
 
-    def create_yes_no(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
+        ttk.Label(t1, text="Введите вопрос:").pack()
+        self.q1 = ttk.Entry(t1, width=40)
+        self.q1.pack(pady=(0, 10))
 
-        inp = QLineEdit()
-        inp.setPlaceholderText("Введите ваш вопрос...")
+        ttk.Label(t1, text="Вероятность 'ДА' (0.0 - 1.0):").pack()
+        self.prob_yes_entry = ttk.Entry(t1, width=10)
+        self.prob_yes_entry.insert(0, "0.5")
+        self.prob_yes_entry.pack(pady=(0, 10))
 
-        res = QLabel("?")
-        res.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        res.setStyleSheet("font-size: 60px; font-weight: bold; color: #ddd;")
+        self.res1 = ttk.Label(t1, text="?", font=("Arial", 35, "bold"), foreground="blue")
+        self.res1.pack(pady=10)
 
-        btn = QPushButton("ПОЛУЧИТЬ ОТВЕТ")
+        ttk.Button(t1, text="Ответить", command=self.generate_yn).pack(pady=5)
 
-        def logic():
-            if inp.text():
-                ans = random.choice(["ДА", "НЕТ"])
-                res.setText(ans)
-                res.setStyleSheet(
-                    f"font-size: 60px; font-weight: bold; color: {'#28C76F' if ans == 'ДА' else '#EA5455'};")
+        #  вкладка
+        t2 = ttk.Frame(nb, padding=20)
+        nb.add(t2, text="Шар (8 ответов)")
 
-        btn.clicked.connect(logic)
+        ttk.Label(t2, text="Введите вопрос шару:").pack()
+        self.q2 = ttk.Entry(t2, width=40)
+        self.q2.pack(pady=(0, 10))
 
-        layout.addWidget(inp)
-        layout.addStretch()
-        layout.addWidget(res)
-        layout.addStretch()
-        layout.addWidget(btn)
-        return page
+        self.res2 = ttk.Label(t2, text="Потряси шар", font=("Arial", 20, "bold"), foreground="purple")
+        self.res2.pack(pady=20)
 
-    def create_ball(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(30, 30, 30, 30)
+        ttk.Button(t2, text="Потрясти", command=self.generate_8ball).pack(pady=5)
 
-        inp = QLineEdit()
-        inp.setPlaceholderText("Спросите магический шар...")
+    def generate_yn(self):
+        if not self.q1.get().strip(): return messagebox.showwarning("Внимание", "Введите вопрос!")
+        try:
+            p_yes = float(self.prob_yes_entry.get().replace(',', '.'))
+            if not (0.0 <= p_yes <= 1.0): raise ValueError
+        except ValueError:
+            return messagebox.showerror("Ошибка", "Число от 0.0 до 1.0!")
 
-        ball = QLabel("8")
-        ball.setObjectName("MagicBall")
-        ball.setFixedSize(180, 180)
-        ball.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ball.setWordWrap(True)
-        self.add_shadow(ball)  # Добавляем тень для красоты
+        ans = ["ДА", "НЕТ"][roll_dice([p_yes, 1.0 - p_yes], self.rng)]
+        self.res1.config(text=ans, foreground="green" if ans == "ДА" else "red")
 
-        btn = QPushButton("ПОТРЯСТИ ШАР")
-
-        def logic():
-            if inp.text():
-                answers = ["Бесспорно", "Предрешено", "Никаких сомнений", "Определённо да", "Да",
-                           "Пока неясно", "Спроси позже", "Лучше не знать",
-                           "Даже не думай", "Мой ответ — нет", "Весьма сомнительно"]
-                ball.setText(random.choice(answers))
-
-        btn.clicked.connect(logic)
-
-        layout.addWidget(inp)
-        layout.addStretch()
-        layout.addWidget(ball, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch()
-        layout.addWidget(btn)
-        return page
+    def generate_8ball(self):
+        if not self.q2.get().strip(): return messagebox.showwarning("Внимание", "Введите вопрос!")
+        self.res2.config(text=ANSWERS_8BALL[roll_dice(PROBS_8BALL, self.rng)])
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = WhiteMinimalApp()
-    window.show()
-    sys.exit(app.exec())
+    try:
+        validate_probabilities()
+        root = tk.Tk()
+        RandomEventsApp(root)
+        root.mainloop()
+    except Exception as e:
+        tk.Tk().withdraw()
+        messagebox.showerror("Ошибка настройки", str(e))
