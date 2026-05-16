@@ -10,19 +10,20 @@ import time
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-class WeatherDTMCApp(ctk.CTk):
+
+class WeatherCTMCApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Модель погоды (DTMC)")
+        self.title("Модель погоды (Непрерывное время)")
         self.geometry("1600x900")
         self.configure(fg_color="#121212")
 
         self.running = False
-        self.current_time = 0
+        self.current_time = 0.0
         self.current_state = 0
         self.step_counter = 0
 
-        self.history_times = [0]
+        self.history_times = [0.0]
         self.history_states = [0]
         self.time_spent = np.zeros(3)
         self.theo_probs = np.zeros(3)
@@ -44,13 +45,15 @@ class WeatherDTMCApp(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
 
-        ctk.CTkLabel(self.sidebar, text="МАТРИЦА ВЕРОЯТНОСТЕЙ ПЕРЕХОДОВ (P)",
+        # Заголовок изменен на матрицу Q
+        ctk.CTkLabel(self.sidebar, text="МАТРИЦА ИНТЕНСИВНОСТЕЙ (Q)",
                      font=("Helvetica", 15, "bold"), text_color="#ffffff").pack(pady=(30, 10))
 
         matrix_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         matrix_frame.pack(pady=10, padx=20)
 
-        default_p = [[0.6, 0.3, 0.1], [0.2, 0.5, 0.3], [0.1, 0.4, 0.5]]
+        # Дефолтные интенсивности (сумма строк = 0)
+        default_q = [[-0.4, 0.3, 0.1], [0.2, -0.5, 0.3], [0.1, 0.4, -0.5]]
         headers = ["Ясно", "Облачно", "Пасмурно"]
 
         for j, h in enumerate(headers):
@@ -68,7 +71,7 @@ class WeatherDTMCApp(ctk.CTk):
             for j in range(3):
                 entry = ctk.CTkEntry(matrix_frame, width=70, height=35, fg_color="#2c2c2c", text_color="#ffffff",
                                      border_width=1, border_color="#444444", corner_radius=6, justify="center")
-                entry.insert(0, str(default_p[i][j]))
+                entry.insert(0, str(default_q[i][j]))
                 entry.grid(row=i + 1, column=j + 1, padx=6, pady=6)
                 row_entries.append(entry)
             self.matrix_inputs.append(row_entries)
@@ -107,7 +110,7 @@ class WeatherDTMCApp(ctk.CTk):
                                         text_color="#ffffff")
         self.state_label.pack(side="left", padx=20)
 
-        self.time_label = ctk.CTkLabel(self.header_frame, text="0 дн.", font=("Helvetica", 32), text_color="#888888")
+        self.time_label = ctk.CTkLabel(self.header_frame, text="0.0 дн.", font=("Helvetica", 32), text_color="#888888")
         self.time_label.pack(side="right", padx=20)
 
         self.fig, (self.ax_line, self.ax_bar) = plt.subplots(1, 2, figsize=(13, 6), facecolor='#121212')
@@ -117,10 +120,10 @@ class WeatherDTMCApp(ctk.CTk):
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.clean_axes()
 
-    def calc_stationary(self, p):
+    def calc_stationary(self, q):
         try:
-            n = p.shape[0]
-            a = p.T - np.eye(n)
+            n = q.shape[0]
+            a = q.T.copy()
             a[-1] = np.ones(n)
             b = np.zeros(n)
             b[-1] = 1
@@ -133,11 +136,11 @@ class WeatherDTMCApp(ctk.CTk):
 
     def toggle_sim(self):
         if not self.running:
-            p_mat = self.get_matrix()
-            if p_mat is None or not np.allclose(p_mat.sum(axis=1), 1, atol=1e-3):
-                tk.messagebox.showerror("Ошибка", "Сумма строки в матрице P должна быть равна 1")
+            q_mat = self.get_matrix()
+            if q_mat is None or not np.allclose(q_mat.sum(axis=1), 0, atol=1e-3):
+                tk.messagebox.showerror("Ошибка", "Сумма строки в матрице Q должна быть равна 0")
                 return
-            self.theo_probs = self.calc_stationary(p_mat)
+            self.theo_probs = self.calc_stationary(q_mat)
             self.running = True
             self.start_btn.configure(text="СТОП")
             threading.Thread(target=self.run_model, daemon=True).start()
@@ -146,13 +149,26 @@ class WeatherDTMCApp(ctk.CTk):
             self.start_btn.configure(text="СТАРТ")
 
     def run_model(self):
-        p_mat = self.get_matrix()
+        q_mat = self.get_matrix()
         while self.running:
-            p_row = p_mat[self.current_state]
+            # Интенсивность выхода из состояния i
+            q_i = -q_mat[self.current_state, self.current_state]
+
+            if q_i <= 0:  # Защита, если оказались в поглощающем состоянии
+                time.sleep(self.speed_slider.get())
+                continue
+
+            # Генерируем экспоненциально распределенное время пребывания
+            tau = np.random.exponential(1.0 / q_i)
+
+            # Вычисляем вероятности перехода (P_ij = Q_ij / -Q_ii)
+            p_row = np.maximum(q_mat[self.current_state], 0)
+            p_row[self.current_state] = 0  # Убираем вероятность остаться в самом себе
+            p_row = p_row / np.sum(p_row)
 
             u = np.random.rand()
             acc = 0.0
-            nxt = 0
+            nxt = self.current_state
             for i in range(3):
                 acc += p_row[i]
                 if u <= acc:
@@ -160,8 +176,8 @@ class WeatherDTMCApp(ctk.CTk):
                     break
 
             start_t = self.current_time
-            self.time_spent[self.current_state] += 1
-            self.current_time += 1
+            self.time_spent[self.current_state] += tau
+            self.current_time += tau
 
             for m in self.milestones:
                 if self.current_time >= m and m not in self.reached_milestones:
@@ -177,7 +193,8 @@ class WeatherDTMCApp(ctk.CTk):
 
             with open(self.csv_file, 'a', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f, delimiter=';')
-                writer.writerow([self.step_counter, start_t, 1, self.current_state + 1,
+                # Теперь мы записываем 'tau' как длительность пребывания
+                writer.writerow([self.step_counter, start_t, tau, self.current_state + 1,
                                  self.states[self.current_state]])
 
             time.sleep(self.speed_slider.get())
@@ -194,7 +211,7 @@ class WeatherDTMCApp(ctk.CTk):
         self.stats_box.see("end")
 
     def draw_charts(self):
-        self.time_label.configure(text=f"{self.current_time} дн.")
+        self.time_label.configure(text=f"{self.current_time:.1f} дн.")  # Отображаем дробное время
         self.state_label.configure(text=self.states[self.current_state])
 
         self.ax_line.clear()
@@ -236,14 +253,15 @@ class WeatherDTMCApp(ctk.CTk):
 
     def full_reset(self):
         self.running = False
-        self.current_time = 0
+        self.current_time = 0.0
         self.time_spent = np.zeros(3)
         self.reached_milestones.clear()
         self.stats_box.delete("1.0", "end")
-        self.history_times, self.history_states = [0], [0]
+        self.history_times, self.history_states = [0.0], [0]
         self.reset_data()
         self.draw_charts()
 
 
 if __name__ == "__main__":
-    WeatherDTMCApp().mainloop()
+    app = WeatherCTMCApp()
+    app.mainloop()
