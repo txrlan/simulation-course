@@ -34,24 +34,36 @@ QTextEdit {
 }
 """
 
-def run_simulation(rate_in, rate_out, total_requests):
-    time_between_arrivals = np.random.exponential(1.0 / rate_in, total_requests)
-    processing_times = np.random.exponential(1.0 / rate_out, total_requests)
-    absolute_arrival_times = np.cumsum(time_between_arrivals)
 
+def run_simulation(rate_in, rate_out, total_requests):
     success_count = 0
     fail_count = 0
+
+    t_curr = 0.0
     system_free_at = 0.0
 
     for i in range(total_requests):
-        arrival = absolute_arrival_times[i]
-        process_time = processing_times[i]
+        if t_curr < system_free_at:
+            delta_t_busy = np.random.exponential(2.0 / rate_in)
+            potential_arrival = t_curr + delta_t_busy
 
-        if arrival >= system_free_at:
-            success_count += 1
-            system_free_at = arrival + process_time
+            if potential_arrival < system_free_at:
+                t_curr = potential_arrival
+                fail_count += 1
+            else:
+                delta_t_free = np.random.exponential(1.0 / rate_in)
+                t_curr = system_free_at + delta_t_free
+
+                success_count += 1
+                process_time = np.random.exponential(1.0 / rate_out)
+                system_free_at = t_curr + process_time
         else:
-            fail_count += 1
+            delta_t = np.random.exponential(1.0 / rate_in)
+            t_curr += delta_t
+
+            success_count += 1
+            process_time = np.random.exponential(1.0 / rate_out)
+            system_free_at = t_curr + process_time
 
     p0 = success_count / total_requests
     p1 = fail_count / total_requests
@@ -154,10 +166,10 @@ class QueuingApp(QMainWindow):
         # симуляция
         p0_emp, p1_emp = run_simulation(rate_lambda, rate_mu, requests_count)
 
-        # 3. расчет (эрланг)
+        # расчет (эрланг)
         rho = rate_lambda / rate_mu
-        p0_theor = 1.0 / (1.0 + rho)
-        p1_theor = rho / (1.0 + rho)
+        p0_theor = 1.0 / (1.0 + 0.5 * rho)
+        p1_theor = (rho * 0.5) / (1.0 + 0.5 * rho)
 
         throughput_theor = rate_lambda * p0_theor
         throughput_emp = rate_lambda * p0_emp
